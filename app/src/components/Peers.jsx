@@ -33,9 +33,20 @@ Peers.propTypes = {
 
 const mapStateToProps = state => {
 	const peersArray = Object.values(state.peers);
+	
+	// Filter peers to only show those with video consumers (broadcasters)
+	const peersWithVideo = peersArray.filter(peer => {
+		const consumersArray = peer.consumers.map(
+			consumerId => state.consumers[consumerId]
+		);
+		const videoConsumer = consumersArray.find(
+			consumer => consumer.track.kind === 'video'
+		);
+		return videoConsumer; // Only show peers that have video consumers
+	});
 
 	return {
-		peers: peersArray,
+		peers: peersWithVideo,
 		activeSpeakerId: state.room.activeSpeakerId,
 	};
 };
