@@ -81,10 +81,11 @@ async function run() {
 	const forceVP8 = urlParser.query.forceVP8 === 'true';
 	const forceH264 = urlParser.query.forceH264 === 'true';
 	const forceVP9 = urlParser.query.forceVP9 === 'true';
-	const forceAV1 = urlParser.query.forceAV1 === 'true';
+	// Variable parsing section in run()
+	const forceAV1 = urlParser.query.forceAV1 !== 'false';
 	const enableWebcamLayers = urlParser.query.enableWebcamLayers !== 'false';
+	const webcamScalabilityMode = urlParser.query.webcamScalabilityMode || 'L1T3';
 	const enableSharingLayers = urlParser.query.enableSharingLayers !== 'false';
-	const webcamScalabilityMode = urlParser.query.webcamScalabilityMode;
 	const sharingScalabilityMode = urlParser.query.sharingScalabilityMode;
 	const numSimulcastStreams = urlParser.query.numSimulcastStreams
 		? Number(urlParser.query.numSimulcastStreams)

@@ -11,6 +11,7 @@ const VIDEO_CONSTRAINS = {
 	qvga: { width: { ideal: 320 }, height: { ideal: 240 } },
 	vga: { width: { ideal: 640 }, height: { ideal: 480 } },
 	hd: { width: { ideal: 1280 }, height: { ideal: 720 } },
+	fhd: { width: { ideal: 1920 }, height: { ideal: 1080 } },
 };
 
 const PC_PROPRIETARY_CONSTRAINTS = {
@@ -244,7 +245,7 @@ export default class RoomClient {
 		// - {String} [resolution] - 'qvga' / 'vga' / 'hd'.
 		this._webcam = {
 			device: null,
-			resolution: 'hd',
+			resolution: 'fhd',
 		};
 
 		if (this._e2eKey && e2e.isSupported()) {
@@ -1054,7 +1055,7 @@ export default class RoomClient {
 					encodings = [
 						{
 							maxBitrate: 5000000,
-							scalabilityMode: this._webcamScalabilityMode || 'L3T3_KEY',
+							scalabilityMode: this._webcamScalabilityMode || 'L1T3',
 						},
 					];
 				}
@@ -1191,7 +1192,7 @@ export default class RoomClient {
 			);
 
 			// Reset video resolution to HD.
-			this._webcam.resolution = 'hd';
+			this._webcam.resolution = 'fhd';
 
 			if (!this._webcam.device) throw new Error('no webcam devices');
 
@@ -1243,10 +1244,13 @@ export default class RoomClient {
 					this._webcam.resolution = 'hd';
 					break;
 				case 'hd':
+					this._webcam.resolution = 'fhd';
+					break;
+				case 'fhd':
 					this._webcam.resolution = 'qvga';
 					break;
 				default:
-					this._webcam.resolution = 'hd';
+					this._webcam.resolution = 'fhd';
 			}
 
 			logger.debug('changeWebcamResolution() | calling getUserMedia()');

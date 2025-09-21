@@ -60,6 +60,8 @@ module.exports =
 		},
 		// mediasoup Router options.
 		// See https://mediasoup.org/documentation/v3/mediasoup/api/#RouterOptions
+		// mediasoup.routerOptions.mediaCodecs
+		
 		routerOptions :
 		{
 			mediaCodecs :
@@ -86,6 +88,15 @@ module.exports =
 					parameters :
 					{
 						'profile-id'             : 2,
+						'x-google-start-bitrate' : 1000
+					}
+				},
+				{
+					kind       : 'video',
+					mimeType   : 'video/AV1',
+					clockRate  : 90000,
+					parameters :
+					{
 						'x-google-start-bitrate' : 1000
 					}
 				},
