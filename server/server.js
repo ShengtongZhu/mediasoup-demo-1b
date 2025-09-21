@@ -14,6 +14,7 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const url = require('url');
+const path = require('path'); // Add this line
 const protoo = require('protoo-server');
 const mediasoup = require('mediasoup');
 const express = require('express');
@@ -181,6 +182,14 @@ async function createExpressApp()
 	expressApp = express();
 
 	expressApp.use(bodyParser.json());
+
+	// Serve static files from public directory
+	expressApp.use(express.static('public'));
+
+	// Serve index.html for root path
+	expressApp.get('/', (req, res) => {
+		res.sendFile(__dirname + '/public/index.html');
+	});
 
 	/**
 	 * For every API request, verify that the roomId in the path matches and
