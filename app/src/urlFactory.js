@@ -7,10 +7,11 @@ if (window.location.hostname === 'test.mediasoup.org') {
 }
 
 const hostname = window.location.hostname;
-const protocol = 'wss';
+// Use non-secure WebSocket for internal network
+const protocol = 'ws';
 
 // const hostname = 'v3demo.mediasoup.org'
-// const protocol = 'ws'
+// const protocol = 'wss'
 
 export function getProtooUrl(params) {
 	const query = qs.stringify(params);
