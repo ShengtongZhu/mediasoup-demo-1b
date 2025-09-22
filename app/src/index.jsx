@@ -221,6 +221,8 @@ async function run() {
 	window.CLIENT = roomClient;
 	// eslint-disable-next-line require-atomic-updates
 	window.CC = roomClient;
+	// eslint-disable-next-line require-atomic-updates
+	window.roomClient = roomClient;
 
 	const domNode = document.getElementById('mediasoup-demo-app-container');
 	const root = createRoot(domNode);
