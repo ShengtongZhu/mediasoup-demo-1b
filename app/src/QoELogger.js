@@ -25,6 +25,9 @@ export default class QoELogger {
 			timestamp: Date.now()
 		};
 
+		// Store historical data for CSV export
+		this.historicalData = [];
+
 		// Bind methods
 		this.start = this.start.bind(this);
 		this.stop = this.stop.bind(this);
@@ -102,6 +105,22 @@ export default class QoELogger {
 
 			// Update timestamp
 			this.qoeMetrics.timestamp = currentTime;
+
+			// Store a copy of current metrics in historical data
+			this.historicalData.push({
+				timestamp: this.qoeMetrics.timestamp,
+				peerId: this.peerId,
+				consumerId: this.consumerId,
+				frameRate: this.qoeMetrics.frameRate,
+				bitrate: Math.round(this.qoeMetrics.bitrate / 1000),
+				packetLoss: this.qoeMetrics.packetLoss,
+				jitter: this.qoeMetrics.jitter,
+				frameDelay: this.qoeMetrics.frameDelay,
+				resolution: `${this.qoeMetrics.resolution.width}x${this.qoeMetrics.resolution.height}`,
+				codec: this.qoeMetrics.codec,
+				score: this.qoeMetrics.score || 'N/A',
+				fractionLost: this.qoeMetrics.fractionLost || 'N/A'
+			});
 
 			// Log the metrics
 			this.logQoEMetrics();
@@ -239,6 +258,16 @@ export default class QoELogger {
 		].join(',');
 
 		console.log(`QoE_CSV: ${csvLine}`);
+	}
+
+	/**
+	 * Get and clear accumulated historical data for CSV export
+	 * @returns {Array} Array of historical data points
+	 */
+	getAndClearHistoricalData() {
+		const data = [...this.historicalData];
+		this.historicalData = []; // Clear after retrieval
+		return data;
 	}
 
 	/**

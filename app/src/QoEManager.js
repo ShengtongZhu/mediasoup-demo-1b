@@ -150,31 +150,32 @@ export default class QoEManager {
 	 * Collect current CSV data from all loggers
 	 */
 	collectCSVData() {
-		const currentTime = Date.now();
-		
 		for (const [consumerId, qoeLogger] of this.qoeLoggers) {
-			const metrics = qoeLogger.getCurrentMetrics();
+			// Get all accumulated historical data since last save
+			const historicalData = qoeLogger.getAndClearHistoricalData();
 			
-			// Only collect if we have valid metrics
-			if (metrics.timestamp && metrics.timestamp > 0) {
+			// Add all historical data points to csvData
+			for (const dataPoint of historicalData) {
 				const row = [
-					metrics.timestamp,
-					qoeLogger.peerId,
-					consumerId,
-					metrics.frameRate,
-					Math.round(metrics.bitrate / 1000),
-					metrics.packetLoss,
-					metrics.jitter,
-					metrics.frameDelay,
-					`${metrics.resolution.width}x${metrics.resolution.height}`,
-					metrics.codec,
-					metrics.score || 'N/A',
-					metrics.fractionLost || 'N/A'
+					dataPoint.timestamp,
+					dataPoint.peerId,
+					dataPoint.consumerId,
+					dataPoint.frameRate,
+					dataPoint.bitrate, // Already in kbps
+					dataPoint.packetLoss,
+					dataPoint.jitter,
+					dataPoint.frameDelay,
+					dataPoint.resolution,
+					dataPoint.codec,
+					dataPoint.score,
+					dataPoint.fractionLost
 				];
 				
 				this.csvData.push(row);
 			}
 		}
+		
+		logger.debug('Collected %d data points for CSV save', this.csvData.length);
 	}
 
 	/**

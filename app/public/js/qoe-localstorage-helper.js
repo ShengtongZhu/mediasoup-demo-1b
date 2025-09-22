@@ -12,7 +12,7 @@ window.QoELocalStorageHelper = {
      * @param {number} logInterval - Logging interval in ms (default: 2000)
      * @param {number} saveInterval - Save interval in ms (default: 10000)
      */
-    enable: function(logInterval = 2000, saveInterval = 10000) {
+    enable: function(logInterval = 1000, saveInterval = 10000) {
         if (window.roomClient && window.roomClient.qoeManager) {
             window.roomClient.qoeManager.enable(logInterval, saveInterval);
             console.log(`✅ QoE logging enabled (log: ${logInterval}ms, save: ${saveInterval}ms)`);
