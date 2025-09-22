@@ -178,6 +178,103 @@ window.QoELocalStorageHelper = {
     },
 
     /**
+     * Download a specific CSV file
+     * @param {string} filename - Filename to download
+     */
+    downloadFile: function(filename) {
+        if (window.roomClient && window.roomClient.qoeManager) {
+            const content = window.roomClient.qoeManager.getCSVFile(filename);
+            if (content) {
+                this._downloadCSV(content, filename);
+                console.log(`💾 Downloaded ${filename}`);
+            } else {
+                console.error(`❌ File ${filename} not found`);
+            }
+        } else {
+            console.error('❌ QoE Manager not found');
+        }
+    },
+
+    /**
+     * Download all CSV files as separate files
+     */
+    downloadAllFiles: function() {
+        if (window.roomClient && window.roomClient.qoeManager) {
+            const files = window.roomClient.qoeManager.getStoredCSVFiles();
+            if (files.length === 0) {
+                console.log('📭 No CSV files found');
+                return;
+            }
+
+            files.forEach(file => {
+                this._downloadCSV(file.content, file.filename);
+            });
+            console.log(`💾 Downloaded ${files.length} CSV files`);
+        } else {
+            console.error('❌ QoE Manager not found');
+        }
+    },
+
+    /**
+     * Download all CSV data combined into one file
+     */
+    downloadCombined: function() {
+        if (window.roomClient && window.roomClient.qoeManager) {
+            const files = window.roomClient.qoeManager.getStoredCSVFiles();
+            if (files.length === 0) {
+                console.log('📭 No CSV files found');
+                return;
+            }
+
+            // Combine all files
+            let combinedContent = '';
+            let headerAdded = false;
+
+            files.forEach(file => {
+                const lines = file.content.split('\n');
+                if (!headerAdded && lines.length > 0) {
+                    combinedContent += lines[0] + '\n'; // Add header
+                    headerAdded = true;
+                }
+                // Add data rows (skip header)
+                for (let i = 1; i < lines.length; i++) {
+                    if (lines[i].trim()) {
+                        combinedContent += lines[i] + '\n';
+                    }
+                }
+            });
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `qoe-combined-${timestamp}.csv`;
+            this._downloadCSV(combinedContent, filename);
+            console.log(`💾 Downloaded combined CSV: ${filename}`);
+        } else {
+            console.error('❌ QoE Manager not found');
+        }
+    },
+
+    /**
+     * Internal helper to download CSV content as file
+     * @param {string} content - CSV content
+     * @param {string} filename - Filename
+     */
+    _downloadCSV: function(content, filename) {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        
+        link.setAttribute('href', url);
+        link.setAttribute('download', filename);
+        link.style.visibility = 'hidden';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        URL.revokeObjectURL(url);
+    },
+
+    /**
      * Clear all stored CSV files
      */
     clearAll: function() {
@@ -229,13 +326,18 @@ window.QoELocalStorageHelper = {
   QoELocalStorageHelper.copyToClipboard(filename) - Copy file to clipboard
   QoELocalStorageHelper.copyAllData() - Copy all data combined
 
+💾 File Downloads:
+  QoELocalStorageHelper.downloadFile(filename) - Download specific file
+  QoELocalStorageHelper.downloadAllFiles() - Download all files separately
+  QoELocalStorageHelper.downloadCombined() - Download all data as one file (recommended)
+
 📊 Real-time:
   QoELocalStorageHelper.showCurrentMetrics() - Show current metrics
 
 Example usage:
   QoELocalStorageHelper.enable(2000, 10000); // Log every 2s, save every 10s
   QoELocalStorageHelper.listFiles(); // See all files
-  QoELocalStorageHelper.copyAllData(); // Copy everything to clipboard
+  QoELocalStorageHelper.downloadCombined(); // Download everything as one CSV file
         `);
     }
 };
