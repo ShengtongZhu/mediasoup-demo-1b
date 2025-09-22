@@ -19,7 +19,19 @@ const PC_PROPRIETARY_CONSTRAINTS = {
 	// optional : [ { googDscp: true } ]
 };
 
-const EXTERNAL_VIDEO_SRC = '/videos/video-audio-stereo.mp4';
+const DEFAULT_VIDEOS = [
+	'/videos/lab1.mp4',
+	// Add more video files as needed
+];
+
+const getExternalVideoSrc = (videoSource) => {
+	if (videoSource && videoSource !== 'true') {
+		// If a specific video path is provided
+		return videoSource.startsWith('/') ? videoSource : `/videos/${videoSource}`;
+	}
+	// Return default video
+	return DEFAULT_VIDEOS[0];
+};
 
 const logger = new Logger('RoomClient');
 
@@ -58,6 +70,7 @@ export default class RoomClient {
 		forceVP9,
 		forceAV1,
 		externalVideo,
+		videoSource,
 		e2eKey,
 		consumerReplicas,
 		stats,
@@ -160,6 +173,10 @@ export default class RoomClient {
 		// @type {HTMLVideoElement}
 		this._externalVideo = null;
 
+		// Store video source configuration
+		this._videoSource = videoSource;
+		this._currentVideoSrc = null;
+
 		// Enabled end-to-end encryption.
 		this._e2eKey = e2eKey;
 
@@ -181,7 +198,10 @@ export default class RoomClient {
 			this._externalVideo.muted = true;
 			this._externalVideo.loop = true;
 			this._externalVideo.setAttribute('playsinline', '');
-			this._externalVideo.src = EXTERNAL_VIDEO_SRC;
+			
+			// Use dynamic video source instead of static EXTERNAL_VIDEO_SRC
+			this._currentVideoSrc = getExternalVideoSrc(videoSource);
+			this._externalVideo.src = this._currentVideoSrc;
 
 			this._externalVideo
 				.play()
@@ -2615,5 +2635,58 @@ export default class RoomClient {
 	 */
 	getQoEStorageStats() {
 		return this._qoeManager.getStorageStats();
+	}
+
+	/**
+	 * Change video source dynamically
+	 * @param {string} newVideoSource - New video source path or name
+	 */
+	async changeVideoSource(newVideoSource) {
+		if (!this._externalVideo) {
+			logger.warn('External video not enabled');
+			return;
+		}
+
+		const newSrc = getExternalVideoSrc(newVideoSource);
+		if (newSrc === this._currentVideoSrc) {
+			logger.debug('Video source unchanged');
+			return;
+		}
+
+		logger.debug('Changing video source to: %s', newSrc);
+		
+		this._currentVideoSrc = newSrc;
+		this._externalVideo.src = newSrc;
+		
+		try {
+			await this._externalVideo.play();
+			
+			// If currently broadcasting, restart webcam to use new video source
+			if (this._webcamProducer && !this._webcamProducer.closed) {
+				await this.disableWebcam();
+				await this.enableWebcam();
+			}
+		} catch (error) {
+			logger.error('Failed to change video source: %o', error);
+		}
+	}
+
+	/**
+	 * Get available video list
+	 * @returns {Array} Array of available videos
+	 */
+	getAvailableVideos() {
+		return DEFAULT_VIDEOS.map(src => ({
+			path: src,
+			name: src.split('/').pop().replace(/\.[^/.]+$/, "")
+		}));
+	}
+
+	/**
+	 * Get current video source
+	 * @returns {string} Current video source path
+	 */
+	getCurrentVideoSource() {
+		return this._currentVideoSrc;
 	}
 }
