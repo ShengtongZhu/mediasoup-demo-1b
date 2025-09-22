@@ -17,6 +17,7 @@ export default class QoEManager {
 		this.csvSaveIntervalMs = 10000; // Default 10 seconds for CSV saves
 		this.csvData = []; // Store CSV rows for batch writing
 		this.sessionStartTime = null;
+		this.sessionFilename = null; // Single filename for the entire session
 
 		// Bind methods
 		this.enable = this.enable.bind(this);
@@ -44,7 +45,12 @@ export default class QoEManager {
 		this.sessionStartTime = new Date();
 		this.csvData = [];
 		
+		// Create single session filename
+		const timestamp = this.sessionStartTime.toISOString().replace(/[:.]/g, '-');
+		this.sessionFilename = `qoe-session-${timestamp}.csv`;
+		
 		logger.debug('QoE Manager enabled with %d ms interval, CSV save every %d ms', intervalMs, csvSaveIntervalMs);
+		logger.debug('Session CSV file: %s', this.sessionFilename);
 
 		// Start logging for existing consumers
 		for (const qoeLogger of this.qoeLoggers.values()) {
@@ -57,7 +63,7 @@ export default class QoEManager {
 			this.saveCSVToLocalStorage();
 		}, csvSaveIntervalMs);
 
-		// Save initial headers
+		// Save initial headers to the session file
 		this.saveCSVToLocalStorage(true);
 
 		// Print CSV headers to console for reference
@@ -183,27 +189,29 @@ export default class QoEManager {
 				'resolution', 'codec', 'score', 'fractionLost(%)'
 			];
 
-			let csvContent = headers.join(',') + '\n';
+			// Get existing content from the session file
+			let existingContent = localStorage.getItem(`qoe-csv-${this.sessionFilename}`) || '';
+			
+			// If file doesn't exist or is empty, add headers
+			if (!existingContent || headersOnly) {
+				existingContent = headers.join(',') + '\n';
+			}
 
+			// Add new data rows if not headers-only
 			if (!headersOnly && this.csvData.length > 0) {
-				// Add all collected data
 				for (const row of this.csvData) {
-					csvContent += row.join(',') + '\n';
+					existingContent += row.join(',') + '\n';
 				}
 				
 				// Clear the data after saving
 				this.csvData = [];
 			}
 
-			// Generate filename with timestamp
-			const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-			const filename = `qoe-metrics-${timestamp}.csv`;
-
-			// Store in localStorage only
-			this.storeCSVInLocalStorage(csvContent, filename);
+			// Store updated content back to localStorage
+			this.storeCSVInLocalStorage(existingContent, this.sessionFilename);
 
 			if (!headersOnly) {
-				logger.debug('CSV data saved to localStorage: %s (%d bytes)', filename, csvContent.length);
+				logger.debug('CSV data appended to session file: %s (%d bytes)', this.sessionFilename, existingContent.length);
 			}
 
 		} catch (error) {
@@ -226,8 +234,8 @@ export default class QoEManager {
 			if (!existingFiles.includes(filename)) {
 				existingFiles.push(filename);
 				
-				// Keep only last 20 files to avoid storage overflow
-				if (existingFiles.length > 20) {
+				// Keep only last 10 session files to avoid storage overflow
+				if (existingFiles.length > 10) {
 					const oldFile = existingFiles.shift();
 					localStorage.removeItem(`qoe-csv-${oldFile}`);
 				}
