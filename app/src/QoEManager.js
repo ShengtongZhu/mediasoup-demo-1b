@@ -5,6 +5,7 @@ const logger = new Logger('QoEManager');
 
 /**
  * QoE Manager - Manages QoE logging for all video consumers
+ * Enhanced with localStorage-only CSV storage (no file downloads)
  */
 export default class QoEManager {
 	constructor(roomClient) {
@@ -22,14 +23,14 @@ export default class QoEManager {
 		this.disable = this.disable.bind(this);
 		this.addConsumer = this.addConsumer.bind(this);
 		this.removeConsumer = this.removeConsumer.bind(this);
-		this.saveCSVFile = this.saveCSVFile.bind(this);
+		this.saveCSVToLocalStorage = this.saveCSVToLocalStorage.bind(this);
 		this.collectCSVData = this.collectCSVData.bind(this);
 	}
 
 	/**
 	 * Enable QoE logging for all current and future consumers
 	 * @param {number} intervalMs - Logging interval in milliseconds
-	 * @param {number} csvSaveIntervalMs - CSV file save interval in milliseconds
+	 * @param {number} csvSaveIntervalMs - CSV save interval in milliseconds
 	 */
 	enable(intervalMs = 2000, csvSaveIntervalMs = 10000) {
 		if (this.isEnabled) {
@@ -50,49 +51,52 @@ export default class QoEManager {
 			qoeLogger.start(intervalMs);
 		}
 
-		// Log CSV header for easy parsing
+		// Start periodic CSV data collection and storage
+		this.csvSaveInterval = setInterval(() => {
+			this.collectCSVData();
+			this.saveCSVToLocalStorage();
+		}, csvSaveIntervalMs);
+
+		// Save initial headers
+		this.saveCSVToLocalStorage(true);
+
+		// Print CSV headers to console for reference
 		const headers = [
 			'timestamp', 'peerId', 'consumerId', 'frameRate(fps)', 
 			'bitrate(kbps)', 'packetLoss(%)', 'jitter(ms)', 'frameDelay(ms)', 
 			'resolution', 'codec', 'score', 'fractionLost(%)'
 		];
-		console.log('QoE_CSV_HEADER: ' + headers.join(','));
-
-		// Set up periodic CSV file saving
-		this.csvSaveInterval = setInterval(() => {
-			this.collectCSVData();
-			this.saveCSVFile();
-		}, csvSaveIntervalMs);
-
-		// Save initial CSV file with headers
-		this.saveCSVFile(true);
+		logger.debug('CSV Headers: %s', headers.join(','));
 	}
 
 	/**
-	 * Disable QoE logging for all consumers
+	 * Disable QoE logging
 	 */
 	disable() {
 		if (!this.isEnabled) {
+			logger.warn('QoE Manager already disabled');
 			return;
 		}
 
 		this.isEnabled = false;
-		logger.debug('QoE Manager disabled');
 
-		// Stop all loggers
+		// Stop all QoE loggers
 		for (const qoeLogger of this.qoeLoggers.values()) {
 			qoeLogger.stop();
 		}
 
-		// Stop CSV saving
+		// Stop CSV collection interval
 		if (this.csvSaveInterval) {
 			clearInterval(this.csvSaveInterval);
 			this.csvSaveInterval = null;
 		}
 
-		// Save final CSV file
-		this.collectCSVData();
-		this.saveCSVFile();
+		// Save any remaining data
+		if (this.csvData.length > 0) {
+			this.saveCSVToLocalStorage();
+		}
+
+		logger.debug('QoE Manager disabled');
 	}
 
 	/**
@@ -102,25 +106,25 @@ export default class QoEManager {
 	 * @param {string} kind - Media kind ('video' or 'audio')
 	 */
 	addConsumer(consumerId, peerId, kind = 'video') {
-		// Only log video consumers for QoE
+		// Only track video consumers for QoE
 		if (kind !== 'video') {
 			return;
 		}
 
 		if (this.qoeLoggers.has(consumerId)) {
-			logger.warn('Consumer %s already being logged', consumerId);
+			logger.warn('Consumer %s already being tracked', consumerId);
 			return;
 		}
-
-		logger.debug('Adding consumer %s (peer: %s) for QoE logging', consumerId, peerId);
 
 		const qoeLogger = new QoELogger(consumerId, peerId, this.roomClient);
 		this.qoeLoggers.set(consumerId, qoeLogger);
 
-		// Start logging if manager is enabled
+		// Start logging if QoE Manager is enabled
 		if (this.isEnabled) {
 			qoeLogger.start(this.logInterval);
 		}
+
+		logger.debug('Added QoE logging for consumer %s (peer: %s)', consumerId, peerId);
 	}
 
 	/**
@@ -129,14 +133,11 @@ export default class QoEManager {
 	 */
 	removeConsumer(consumerId) {
 		const qoeLogger = this.qoeLoggers.get(consumerId);
-		if (!qoeLogger) {
-			return;
+		if (qoeLogger) {
+			qoeLogger.stop();
+			this.qoeLoggers.delete(consumerId);
+			logger.debug('Removed QoE logging for consumer %s', consumerId);
 		}
-
-		logger.debug('Removing consumer %s from QoE logging', consumerId);
-
-		qoeLogger.stop();
-		this.qoeLoggers.delete(consumerId);
 	}
 
 	/**
@@ -171,10 +172,10 @@ export default class QoEManager {
 	}
 
 	/**
-	 * Save CSV file to local storage or download
+	 * Save CSV data to localStorage only (no file download)
 	 * @param {boolean} headersOnly - If true, only save headers
 	 */
-	saveCSVFile(headersOnly = false) {
+	saveCSVToLocalStorage(headersOnly = false) {
 		try {
 			const headers = [
 				'timestamp', 'peerId', 'consumerId', 'frameRate(fps)', 
@@ -198,41 +199,15 @@ export default class QoEManager {
 			const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 			const filename = `qoe-metrics-${timestamp}.csv`;
 
-			// Create and download the file
-			this.downloadCSVFile(csvContent, filename);
-
-			// Also store in localStorage for persistence
+			// Store in localStorage only
 			this.storeCSVInLocalStorage(csvContent, filename);
 
-			logger.debug('CSV file saved: %s (%d bytes)', filename, csvContent.length);
-
-		} catch (error) {
-			logger.error('Error saving CSV file: %o', error);
-		}
-	}
-
-	/**
-	 * Download CSV file to user's machine
-	 * @param {string} csvContent - CSV content
-	 * @param {string} filename - Filename
-	 */
-	downloadCSVFile(csvContent, filename) {
-		try {
-			const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-			const link = document.createElement('a');
-			
-			if (link.download !== undefined) {
-				const url = URL.createObjectURL(blob);
-				link.setAttribute('href', url);
-				link.setAttribute('download', filename);
-				link.style.visibility = 'hidden';
-				document.body.appendChild(link);
-				link.click();
-				document.body.removeChild(link);
-				URL.revokeObjectURL(url);
+			if (!headersOnly) {
+				logger.debug('CSV data saved to localStorage: %s (%d bytes)', filename, csvContent.length);
 			}
+
 		} catch (error) {
-			logger.error('Error downloading CSV file: %o', error);
+			logger.error('Error saving CSV to localStorage: %o', error);
 		}
 	}
 
@@ -251,8 +226,8 @@ export default class QoEManager {
 			if (!existingFiles.includes(filename)) {
 				existingFiles.push(filename);
 				
-				// Keep only last 10 files to avoid storage overflow
-				if (existingFiles.length > 10) {
+				// Keep only last 20 files to avoid storage overflow
+				if (existingFiles.length > 20) {
 					const oldFile = existingFiles.shift();
 					localStorage.removeItem(`qoe-csv-${oldFile}`);
 				}
@@ -266,19 +241,37 @@ export default class QoEManager {
 
 	/**
 	 * Get all stored CSV files from localStorage
-	 * @returns {Array} Array of {filename, content} objects
+	 * @returns {Array} Array of {filename, content, size, timestamp} objects
 	 */
 	getStoredCSVFiles() {
 		try {
 			const files = JSON.parse(localStorage.getItem('qoe-csv-files') || '[]');
-			return files.map(filename => ({
-				filename,
-				content: localStorage.getItem(`qoe-csv-${filename}`) || '',
-				size: (localStorage.getItem(`qoe-csv-${filename}`) || '').length
-			}));
+			return files.map(filename => {
+				const content = localStorage.getItem(`qoe-csv-${filename}`) || '';
+				return {
+					filename,
+					content,
+					size: content.length,
+					timestamp: filename.match(/qoe-metrics-(.+)\.csv/)?.[1] || 'unknown'
+				};
+			}).sort((a, b) => b.timestamp.localeCompare(a.timestamp)); // Sort by timestamp, newest first
 		} catch (error) {
 			logger.error('Error retrieving stored CSV files: %o', error);
 			return [];
+		}
+	}
+
+	/**
+	 * Get a specific CSV file content
+	 * @param {string} filename - Filename to retrieve
+	 * @returns {string|null} CSV content or null if not found
+	 */
+	getCSVFile(filename) {
+		try {
+			return localStorage.getItem(`qoe-csv-${filename}`);
+		} catch (error) {
+			logger.error('Error retrieving CSV file %s: %o', filename, error);
+			return null;
 		}
 	}
 
@@ -295,6 +288,69 @@ export default class QoEManager {
 			logger.debug('Cleared all stored CSV files');
 		} catch (error) {
 			logger.error('Error clearing stored CSV files: %o', error);
+		}
+	}
+
+	/**
+	 * Get storage usage statistics
+	 * @returns {Object} Storage statistics
+	 */
+	getStorageStats() {
+		try {
+			const files = this.getStoredCSVFiles();
+			const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+			const totalFiles = files.length;
+			
+			return {
+				totalFiles,
+				totalSize,
+				totalSizeKB: Math.round(totalSize / 1024),
+				files: files.map(f => ({
+					filename: f.filename,
+					size: f.size,
+					sizeKB: Math.round(f.size / 1024),
+					timestamp: f.timestamp
+				}))
+			};
+		} catch (error) {
+			logger.error('Error getting storage stats: %o', error);
+			return { totalFiles: 0, totalSize: 0, totalSizeKB: 0, files: [] };
+		}
+	}
+
+	/**
+	 * Set CSV save interval
+	 * @param {number} intervalMs - New interval in milliseconds
+	 */
+	setCSVSaveInterval(intervalMs) {
+		if (intervalMs < 1000) {
+			logger.warn('CSV save interval too short, minimum is 1000ms');
+			return;
+		}
+
+		this.csvSaveIntervalMs = intervalMs;
+		
+		if (this.isEnabled && this.csvSaveInterval) {
+			clearInterval(this.csvSaveInterval);
+			this.csvSaveInterval = setInterval(() => {
+				this.collectCSVData();
+				this.saveCSVToLocalStorage();
+			}, intervalMs);
+			
+			logger.debug('CSV save interval updated to %d ms', intervalMs);
+		}
+	}
+
+	/**
+	 * Manually trigger CSV save
+	 */
+	manualSaveCSV() {
+		if (this.isEnabled) {
+			this.collectCSVData();
+			this.saveCSVToLocalStorage();
+			logger.debug('Manual CSV save triggered');
+		} else {
+			logger.warn('QoE Manager not enabled, cannot save CSV');
 		}
 	}
 

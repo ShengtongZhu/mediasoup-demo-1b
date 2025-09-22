@@ -1,0 +1,3 @@
+window.roomClient.qoeManager.enable(2000, 10000);
+window.roomClient.qoeManager.getStoredCSVFiles();
+window.roomClient.qoeManager.clearStoredCSVFiles();

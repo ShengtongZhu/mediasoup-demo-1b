@@ -2533,9 +2533,10 @@ export default class RoomClient {
 	/**
 	 * Enable QoE logging
 	 * @param {number} intervalMs - Logging interval in milliseconds
+	 * @param {number} csvSaveIntervalMs - CSV save interval in milliseconds
 	 */
-	enableQoELogging(intervalMs = 2000) {
-		this._qoeManager.enable(intervalMs);
+	enableQoELogging(intervalMs = 2000, csvSaveIntervalMs = 10000) {
+		this._qoeManager.enable(intervalMs, csvSaveIntervalMs);
 	}
 
 	/**
@@ -2543,6 +2544,14 @@ export default class RoomClient {
 	 */
 	disableQoELogging() {
 		this._qoeManager.disable();
+	}
+
+	/**
+	 * Get QoE Manager instance for advanced operations
+	 * @returns {QoEManager} QoE Manager instance
+	 */
+	get qoeManager() {
+		return this._qoeManager;
 	}
 
 	/**
@@ -2568,5 +2577,43 @@ export default class RoomClient {
 	 */
 	exportQoEAsCSV() {
 		return this._qoeManager.exportAsCSV();
+	}
+
+	/**
+	 * Set QoE CSV save interval
+	 * @param {number} intervalMs - Interval in milliseconds
+	 */
+	setQoECSVSaveInterval(intervalMs) {
+		this._qoeManager.setCSVSaveInterval(intervalMs);
+	}
+
+	/**
+	 * Manually save QoE CSV data
+	 */
+	saveQoECSV() {
+		this._qoeManager.manualSaveCSV();
+	}
+
+	/**
+	 * Get stored QoE CSV files
+	 * @returns {Array} Array of stored files
+	 */
+	getStoredQoEFiles() {
+		return this._qoeManager.getStoredCSVFiles();
+	}
+
+	/**
+	 * Clear all stored QoE CSV files
+	 */
+	clearQoEFiles() {
+		this._qoeManager.clearStoredCSVFiles();
+	}
+
+	/**
+	 * Get QoE storage statistics
+	 * @returns {Object} Storage statistics
+	 */
+	getQoEStorageStats() {
+		return this._qoeManager.getStorageStats();
 	}
 }
