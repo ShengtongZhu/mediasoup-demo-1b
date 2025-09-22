@@ -6,6 +6,7 @@ import * as cookiesManager from './cookiesManager';
 import * as requestActions from './redux/requestActions';
 import * as stateActions from './redux/stateActions';
 import * as e2e from './e2e';
+import QoEManager from './QoEManager';
 
 const VIDEO_CONSTRAINS = {
 	qvga: { width: { ideal: 320 }, height: { ideal: 240 } },
@@ -251,6 +252,9 @@ export default class RoomClient {
 		if (this._e2eKey && e2e.isSupported()) {
 			e2e.setCryptoKey('setCryptoKey', this._e2eKey, true);
 		}
+
+		// QoE Manager for video quality logging
+		this._qoeManager = new QoEManager(this);
 	}
 
 	close() {
@@ -259,6 +263,9 @@ export default class RoomClient {
 		this._closed = true;
 
 		logger.debug('close()');
+
+		// Disable QoE logging
+		this._qoeManager.disable();
 
 		// Close protoo Peer
 		this._protoo.close();
@@ -405,6 +412,9 @@ export default class RoomClient {
 								peerId
 							)
 						);
+
+						// Add consumer to QoE logging
+						this._qoeManager.addConsumer(consumer.id, peerId, consumer.kind);
 
 						// We are ready. Answer the protoo request so the server will
 						// resume this Consumer (which was paused for now if video).
@@ -683,6 +693,9 @@ export default class RoomClient {
 					const consumer = this._consumers.get(consumerId);
 
 					if (!consumer) break;
+
+					// Remove from QoE logging
+					this._qoeManager.removeConsumer(consumerId);
 
 					consumer.close();
 					this._consumers.delete(consumerId);
@@ -2389,6 +2402,17 @@ export default class RoomClient {
 
 				store.dispatch(stateActions.setRoomStatsPeerId(me.id));
 			}
+
+			// Enable QoE logging after joining
+			// You can make this configurable via URL parameters
+			const urlParams = new URLSearchParams(window.location.search);
+			const enableQoE = urlParams.get('qoe') === 'true';
+			const qoeInterval = parseInt(urlParams.get('qoeInterval')) || 2000;
+
+			if (enableQoE) {
+				logger.debug('Enabling QoE logging with %d ms interval', qoeInterval);
+				this._qoeManager.enable(qoeInterval);
+			}
 		} catch (error) {
 			logger.error('_joinRoom() failed:%o', error);
 
@@ -2504,5 +2528,45 @@ export default class RoomClient {
 		else throw new Error('video.captureStream() not supported');
 
 		return this._externalVideoStream;
+	}
+
+	/**
+	 * Enable QoE logging
+	 * @param {number} intervalMs - Logging interval in milliseconds
+	 */
+	enableQoELogging(intervalMs = 2000) {
+		this._qoeManager.enable(intervalMs);
+	}
+
+	/**
+	 * Disable QoE logging
+	 */
+	disableQoELogging() {
+		this._qoeManager.disable();
+	}
+
+	/**
+	 * Get QoE metrics for all consumers
+	 * @returns {Object} QoE metrics
+	 */
+	getQoEMetrics() {
+		return this._qoeManager.getAllMetrics();
+	}
+
+	/**
+	 * Get QoE metrics for a specific consumer
+	 * @param {string} consumerId - Consumer ID
+	 * @returns {Object|null} QoE metrics
+	 */
+	getConsumerQoEMetrics(consumerId) {
+		return this._qoeManager.getConsumerMetrics(consumerId);
+	}
+
+	/**
+	 * Export QoE data as CSV
+	 * @returns {string} CSV data
+	 */
+	exportQoEAsCSV() {
+		return this._qoeManager.exportAsCSV();
 	}
 }

@@ -7,6 +7,7 @@ const Logger = require('./Logger');
 const utils = require('./utils');
 const config = require('../config');
 const Bot = require('./Bot');
+const QoECollector = require('./QoECollector');
 
 const logger = new Logger('Room');
 
@@ -137,6 +138,12 @@ class Room extends EventEmitter
 		// @type {Boolean}
 		this._networkThrottled = false;
 
+		// QoE Collector for server-side metrics
+		this._qoeCollector = new QoECollector();
+
+		// Enable QoE collection by default (can be made configurable)
+		this._qoeCollector.enable(5000); // 5 second intervals
+
 		// Handle audioLevelObserver.
 		this._handleAudioLevelObserver();
 
@@ -166,6 +173,9 @@ class Room extends EventEmitter
 
 		// Close the Bot.
 		this._bot.close();
+
+		// Disable QoE collection
+		this._qoeCollector.disable();
 
 		// Emit 'close' event.
 		this.emit('close');
@@ -1689,6 +1699,24 @@ class Room extends EventEmitter
 				break;
 			}
 
+			case 'getQoEMetrics':
+			{
+				const { consumerId } = request.data;
+
+				if (consumerId)
+				{
+					const metrics = this._qoeCollector.getConsumerMetrics(consumerId);
+					accept(metrics);
+				}
+				else
+				{
+					const allMetrics = this._qoeCollector.getAllMetrics();
+					accept(allMetrics);
+				}
+
+				break;
+			}
+
 			default:
 			{
 				logger.error('unknown request.method "%s"', request.method);
@@ -1788,17 +1816,24 @@ class Room extends EventEmitter
 					// Store the Consumer into the protoo consumerPeer data Object.
 					consumerPeer.data.consumers.set(consumer.id, consumer);
 
+					// Add to QoE collector
+					this._qoeCollector.addConsumer(consumer, consumerPeer.id);
+
 					// Set Consumer events.
 					consumer.on('transportclose', () =>
 					{
 						// Remove from its map.
 						consumerPeer.data.consumers.delete(consumer.id);
+						// Remove from QoE collector
+						this._qoeCollector.removeConsumer(consumer.id);
 					});
 
 					consumer.on('producerclose', () =>
 					{
 						// Remove from its map.
 						consumerPeer.data.consumers.delete(consumer.id);
+						// Remove from QoE collector
+						this._qoeCollector.removeConsumer(consumer.id);
 
 						consumerPeer.notify('consumerClosed', { consumerId: consumer.id })
 							.catch(() => {});
