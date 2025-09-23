@@ -284,6 +284,12 @@ export default class RoomClient {
 
 		logger.debug('close()');
 
+		// Clear external video interval if it exists
+		if (this._externalVideoInterval) {
+			clearInterval(this._externalVideoInterval);
+			this._externalVideoInterval = null;
+		}
+
 		// Disable QoE logging
 		this._qoeManager.disable();
 
@@ -472,26 +478,52 @@ export default class RoomClient {
 						// Add consumer to QoE logging
 						this._qoeManager.addConsumer(consumer.id, peerId, consumer.kind);
 
-						// We are ready. Answer the protoo request so the server will
-						// resume this Consumer (which was paused for now if video).
-						accept();
-
-						// FIXED: Only pause video consumers if explicitly in audio-only mode
-						// and not when using external video (pre-recorded video broadcasting)
-						if (consumer.kind === 'video' && 
-							store.getState().me.audioOnly && 
-							!this._externalVideo) {
-							this._pauseConsumer(consumer);
-						}
-						
-						// For external video broadcasting, ensure video consumers stay active
+						// For external video broadcasting, we need special handling
 						if (consumer.kind === 'video' && this._externalVideo) {
-							// Force resume the consumer to ensure it stays active
-							setTimeout(() => {
+							// Accept first to let server resume the consumer
+							accept();
+							
+							// Then ensure it stays active with more aggressive monitoring
+							const ensureVideoActive = () => {
 								if (!consumer.closed && consumer.paused) {
-									this._resumeConsumer(consumer);
+									logger.debug('Force resuming external video consumer:', consumer.id);
+									this._resumeConsumer(consumer).catch((error) => {
+										logger.error('Failed to resume external video consumer:', error);
+									});
 								}
-							}, 100);
+							};
+							
+							// Immediate check after a short delay
+							setTimeout(ensureVideoActive, 200);
+							
+							// Store interval ID for cleanup
+							const intervalId = setInterval(ensureVideoActive, 500); // More frequent checks
+							
+							// Store interval for cleanup when consumer closes
+							consumer.on('transportclose', () => {
+								clearInterval(intervalId);
+							});
+							consumer.on('producerclose', () => {
+								clearInterval(intervalId);
+							});
+							
+						} else {
+							// Standard handling for non-external video consumers
+							const shouldPauseVideo = consumer.kind === 'video' && 
+								store.getState().me.audioOnly && 
+								!this._externalVideo;
+
+							// Accept the consumer first
+							accept();
+
+							// If we need to pause it, do so after server has processed accept
+							if (shouldPauseVideo) {
+								setTimeout(() => {
+									if (!consumer.closed) {
+										this._pauseConsumer(consumer);
+									}
+								}, 100); // Increased delay for better reliability
+							}
 						}
 					} catch (error) {
 						logger.error('"newConsumer" request failed:%o', error);
@@ -783,9 +815,20 @@ export default class RoomClient {
 
 					if (!consumer) break;
 
-					consumer.pause();
-
-					store.dispatch(stateActions.setConsumerPaused(consumerId, 'remote'));
+					// For external video, immediately try to resume if paused by server
+					if (consumer.kind === 'video' && this._externalVideo) {
+						logger.debug('External video consumer paused by server, attempting resume:', consumerId);
+						setTimeout(() => {
+							if (!consumer.closed) {
+								this._resumeConsumer(consumer).catch((error) => {
+									logger.error('Failed to resume externally paused video consumer:', error);
+								});
+							}
+						}, 100);
+					} else {
+						consumer.pause();
+						store.dispatch(stateActions.setConsumerPaused(consumerId, 'remote'));
+					}
 
 					break;
 				}
@@ -2481,25 +2524,20 @@ export default class RoomClient {
 				store.dispatch(stateActions.setRoomStatsPeerId(me.id));
 			}
 
-			// Enable QoE logging after joining
-			// You can make this configurable via URL parameters
-			const urlParams = new URLSearchParams(window.location.search);
-			const enableQoE = urlParams.get('qoe') === 'true';
-			const qoeInterval = parseInt(urlParams.get('qoeInterval')) || 2000;
-
-			if (enableQoE) {
-				logger.debug('Enabling QoE logging with %d ms interval', qoeInterval);
-				this._qoeManager.enable(qoeInterval);
+			// Enable QoE logging if requested
+			if (this._stats) {
+				this.enableQoELogging();
 			}
 
-			// Prevent auto audio-only for external video broadcasting
+			// For external video broadcasting, prevent auto audio-only mode
 			if (this._externalVideo) {
+				// Initial prevention
 				this._preventAutoAudioOnly();
 				
-				// Set up periodic check to ensure video consumers stay active
-				setInterval(() => {
+				// Set up more aggressive monitoring for external video
+				this._externalVideoInterval = setInterval(() => {
 					this._preventAutoAudioOnly();
-				}, 5000); // Check every 5 seconds
+				}, 500); // Check every 500ms for external video
 			}
 		} catch (error) {
 			logger.error('_joinRoom() failed:%o', error);
@@ -2605,13 +2643,30 @@ export default class RoomClient {
 	 */
 	_preventAutoAudioOnly() {
 		if (this._externalVideo) {
-			// Override the audio-only state to false for external video
-			store.dispatch(stateActions.setAudioOnlyState(false));
-			
-			// Ensure all video consumers are resumed
+			// Force disable audio-only mode when using external video
+			const currentState = store.getState().me;
+			if (currentState.audioOnly) {
+				logger.debug('_preventAutoAudioOnly() | disabling audio-only mode for external video');
+				store.dispatch(stateActions.setAudioOnlyState(false));
+			}
+
+			// Resume all paused video consumers more aggressively
 			for (const consumer of this._consumers.values()) {
-				if (consumer.kind === 'video' && consumer.paused) {
-					this._resumeConsumer(consumer);
+				if (consumer.kind === 'video' && consumer.paused && !consumer.closed) {
+					logger.debug('_preventAutoAudioOnly() | resuming video consumer:', consumer.id);
+					this._resumeConsumer(consumer).catch((error) => {
+						logger.error('_preventAutoAudioOnly() | failed to resume consumer:', error);
+					});
+				}
+			}
+			
+			// Also check if any video consumers are not receiving data
+			for (const consumer of this._consumers.values()) {
+				if (consumer.kind === 'video' && !consumer.closed && !consumer.paused) {
+					// Request key frame to ensure video flow
+					this.requestConsumerKeyFrame(consumer.id).catch(() => {
+						// Ignore errors, this is just a recovery attempt
+					});
 				}
 			}
 		}
