@@ -6,6 +6,7 @@ import * as cookiesManager from './cookiesManager';
 import * as requestActions from './redux/requestActions';
 import * as stateActions from './redux/stateActions';
 import * as e2e from './e2e';
+import QoEManager from './QoEManager';
 
 const VIDEO_CONSTRAINS = {
 	qvga: { width: { ideal: 320 }, height: { ideal: 240 } },
@@ -18,7 +19,19 @@ const PC_PROPRIETARY_CONSTRAINTS = {
 	// optional : [ { googDscp: true } ]
 };
 
-const EXTERNAL_VIDEO_SRC = '/videos/video-audio-stereo.mp4';
+const DEFAULT_VIDEOS = [
+	'/videos/lab1.mp4',
+	// Add more video files as needed
+];
+
+const getExternalVideoSrc = (videoSource) => {
+	if (videoSource && videoSource !== 'true') {
+		// If a specific video path is provided
+		return videoSource.startsWith('/') ? videoSource : `/videos/${videoSource}`;
+	}
+	// Return default video
+	return DEFAULT_VIDEOS[0];
+};
 
 const logger = new Logger('RoomClient');
 
@@ -57,6 +70,7 @@ export default class RoomClient {
 		forceVP9,
 		forceAV1,
 		externalVideo,
+		videoSource,
 		e2eKey,
 		consumerReplicas,
 		stats,
@@ -159,6 +173,10 @@ export default class RoomClient {
 		// @type {HTMLVideoElement}
 		this._externalVideo = null;
 
+		// Store video source configuration
+		this._videoSource = videoSource;
+		this._currentVideoSrc = null;
+
 		// Enabled end-to-end encryption.
 		this._e2eKey = e2eKey;
 
@@ -180,7 +198,10 @@ export default class RoomClient {
 			this._externalVideo.muted = true;
 			this._externalVideo.loop = true;
 			this._externalVideo.setAttribute('playsinline', '');
-			this._externalVideo.src = EXTERNAL_VIDEO_SRC;
+			
+			// Use dynamic video source instead of static EXTERNAL_VIDEO_SRC
+			this._currentVideoSrc = getExternalVideoSrc(videoSource);
+			this._externalVideo.src = this._currentVideoSrc;
 
 			this._externalVideo
 				.play()
@@ -251,6 +272,9 @@ export default class RoomClient {
 		if (this._e2eKey && e2e.isSupported()) {
 			e2e.setCryptoKey('setCryptoKey', this._e2eKey, true);
 		}
+
+		// QoE Manager for video quality logging
+		this._qoeManager = new QoEManager(this);
 	}
 
 	close() {
@@ -259,6 +283,9 @@ export default class RoomClient {
 		this._closed = true;
 
 		logger.debug('close()');
+
+		// Disable QoE logging
+		this._qoeManager.disable();
 
 		// Close protoo Peer
 		this._protoo.close();
@@ -405,6 +432,9 @@ export default class RoomClient {
 								peerId
 							)
 						);
+
+						// Add consumer to QoE logging
+						this._qoeManager.addConsumer(consumer.id, peerId, consumer.kind);
 
 						// We are ready. Answer the protoo request so the server will
 						// resume this Consumer (which was paused for now if video).
@@ -683,6 +713,9 @@ export default class RoomClient {
 					const consumer = this._consumers.get(consumerId);
 
 					if (!consumer) break;
+
+					// Remove from QoE logging
+					this._qoeManager.removeConsumer(consumerId);
 
 					consumer.close();
 					this._consumers.delete(consumerId);
@@ -2391,6 +2424,17 @@ export default class RoomClient {
 
 				store.dispatch(stateActions.setRoomStatsPeerId(me.id));
 			}
+
+			// Enable QoE logging after joining
+			// You can make this configurable via URL parameters
+			const urlParams = new URLSearchParams(window.location.search);
+			const enableQoE = urlParams.get('qoe') === 'true';
+			const qoeInterval = parseInt(urlParams.get('qoeInterval')) || 2000;
+
+			if (enableQoE) {
+				logger.debug('Enabling QoE logging with %d ms interval', qoeInterval);
+				this._qoeManager.enable(qoeInterval);
+			}
 		} catch (error) {
 			logger.error('_joinRoom() failed:%o', error);
 
@@ -2515,5 +2559,145 @@ export default class RoomClient {
 		else throw new Error('video.captureStream() not supported');
 
 		return this._externalVideoStream;
+	}
+
+	/**
+	 * Enable QoE logging
+	 * @param {number} intervalMs - Logging interval in milliseconds
+	 * @param {number} csvSaveIntervalMs - CSV save interval in milliseconds
+	 */
+	enableQoELogging(intervalMs = 2000, csvSaveIntervalMs = 10000) {
+		this._qoeManager.enable(intervalMs, csvSaveIntervalMs);
+	}
+
+	/**
+	 * Disable QoE logging
+	 */
+	disableQoELogging() {
+		this._qoeManager.disable();
+	}
+
+	/**
+	 * Get QoE Manager instance for advanced operations
+	 * @returns {QoEManager} QoE Manager instance
+	 */
+	get qoeManager() {
+		return this._qoeManager;
+	}
+
+	/**
+	 * Get QoE metrics for all consumers
+	 * @returns {Object} QoE metrics
+	 */
+	getQoEMetrics() {
+		return this._qoeManager.getAllMetrics();
+	}
+
+	/**
+	 * Get QoE metrics for a specific consumer
+	 * @param {string} consumerId - Consumer ID
+	 * @returns {Object|null} QoE metrics
+	 */
+	getConsumerQoEMetrics(consumerId) {
+		return this._qoeManager.getConsumerMetrics(consumerId);
+	}
+
+	/**
+	 * Export QoE data as CSV
+	 * @returns {string} CSV data
+	 */
+	exportQoEAsCSV() {
+		return this._qoeManager.exportAsCSV();
+	}
+
+	/**
+	 * Set QoE CSV save interval
+	 * @param {number} intervalMs - Interval in milliseconds
+	 */
+	setQoECSVSaveInterval(intervalMs) {
+		this._qoeManager.setCSVSaveInterval(intervalMs);
+	}
+
+	/**
+	 * Manually save QoE CSV data
+	 */
+	saveQoECSV() {
+		this._qoeManager.manualSaveCSV();
+	}
+
+	/**
+	 * Get stored QoE CSV files
+	 * @returns {Array} Array of stored files
+	 */
+	getStoredQoEFiles() {
+		return this._qoeManager.getStoredCSVFiles();
+	}
+
+	/**
+	 * Clear all stored QoE CSV files
+	 */
+	clearQoEFiles() {
+		this._qoeManager.clearStoredCSVFiles();
+	}
+
+	/**
+	 * Get QoE storage statistics
+	 * @returns {Object} Storage statistics
+	 */
+	getQoEStorageStats() {
+		return this._qoeManager.getStorageStats();
+	}
+
+	/**
+	 * Change video source dynamically
+	 * @param {string} newVideoSource - New video source path or name
+	 */
+	async changeVideoSource(newVideoSource) {
+		if (!this._externalVideo) {
+			logger.warn('External video not enabled');
+			return;
+		}
+
+		const newSrc = getExternalVideoSrc(newVideoSource);
+		if (newSrc === this._currentVideoSrc) {
+			logger.debug('Video source unchanged');
+			return;
+		}
+
+		logger.debug('Changing video source to: %s', newSrc);
+		
+		this._currentVideoSrc = newSrc;
+		this._externalVideo.src = newSrc;
+		
+		try {
+			await this._externalVideo.play();
+			
+			// If currently broadcasting, restart webcam to use new video source
+			if (this._webcamProducer && !this._webcamProducer.closed) {
+				await this.disableWebcam();
+				await this.enableWebcam();
+			}
+		} catch (error) {
+			logger.error('Failed to change video source: %o', error);
+		}
+	}
+
+	/**
+	 * Get available video list
+	 * @returns {Array} Array of available videos
+	 */
+	getAvailableVideos() {
+		return DEFAULT_VIDEOS.map(src => ({
+			path: src,
+			name: src.split('/').pop().replace(/\.[^/.]+$/, "")
+		}));
+	}
+
+	/**
+	 * Get current video source
+	 * @returns {string} Current video source path
+	 */
+	getCurrentVideoSource() {
+		return this._currentVideoSrc;
 	}
 }

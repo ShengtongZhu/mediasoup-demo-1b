@@ -94,6 +94,7 @@ async function run() {
 	const stats = urlParser.query.stats === 'true';
 	const faceDetection = urlParser.query.faceDetection === 'true';
 	const externalVideo = urlParser.query.externalVideo === 'true';
+	const videoSource = urlParser.query.videoSource; // New parameter
 	const throttleSecret = urlParser.query.throttleSecret;
 	const e2eKey = urlParser.query.e2eKey;
 	const consumerReplicas = urlParser.query.consumerReplicas;
@@ -211,6 +212,7 @@ async function run() {
 		sharingScalabilityMode,
 		numSimulcastStreams,
 		externalVideo,
+		videoSource, // Pass the new parameter
 		e2eKey,
 		consumerReplicas,
 		stats,
@@ -221,6 +223,8 @@ async function run() {
 	window.CLIENT = roomClient;
 	// eslint-disable-next-line require-atomic-updates
 	window.CC = roomClient;
+	// eslint-disable-next-line require-atomic-updates
+	window.roomClient = roomClient;
 
 	const domNode = document.getElementById('mediasoup-demo-app-container');
 	const root = createRoot(domNode);
