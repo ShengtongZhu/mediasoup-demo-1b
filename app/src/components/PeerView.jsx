@@ -546,9 +546,12 @@ export default class PeerView extends React.Component {
 			stream.addTrack(audioTrack);
 			audioElem.srcObject = stream;
 
-			audioElem
-				.play()
-				.catch(error => logger.warn('audioElem.play() failed:%o', error));
+			// Only call play() if paused and we have a srcObject
+			if (audioElem.srcObject && audioElem.paused) {
+				audioElem
+					.play()
+					.catch(error => logger.warn('audioElem.play() failed:%o', error));
+			}
 
 			this._runHark(stream);
 		} else {

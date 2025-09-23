@@ -806,7 +806,8 @@ export default class RoomClient {
 			} else {
 				const stream = await this._getExternalVideoStream();
 
-				track = stream.getAudioTracks()[0].clone();
+				// Use the original audio track to avoid freezes with captureStream clones
+				track = stream.getAudioTracks()[0];
 			}
 
 			let codec;
@@ -995,7 +996,8 @@ export default class RoomClient {
 
 				const stream = await this._getExternalVideoStream();
 
-				track = stream.getVideoTracks()[0].clone();
+				// Use the original video track to avoid freezes with captureStream clones
+				track = stream.getVideoTracks()[0];
 			}
 
 			let encodings;
@@ -2495,6 +2497,15 @@ export default class RoomClient {
 			await new Promise(resolve =>
 				this._externalVideo.addEventListener('canplay', resolve)
 			);
+		}
+
+		// Ensure it is actually playing before capturing
+		if (this._externalVideo.paused) {
+			try {
+				await this._externalVideo.play();
+			} catch (error) {
+				logger.warn('externalVideo.play() failed:%o', error);
+			}
 		}
 
 		if (this._externalVideo.captureStream)
