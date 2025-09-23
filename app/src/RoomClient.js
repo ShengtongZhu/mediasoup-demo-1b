@@ -407,6 +407,42 @@ export default class RoomClient {
 							this._consumers.delete(consumer.id);
 						});
 
+						consumer.on('producerclose', () => {
+							logger.debug('Consumer "producerclose" event [consumerId:%s]', consumer.id);
+
+							this._consumers.delete(consumer.id);
+
+							store.dispatch(stateActions.removeConsumer(consumer.id, peerId));
+						});
+
+						consumer.on('producerpause', () => {
+							logger.debug('Consumer "producerpause" event [consumerId:%s]', consumer.id);
+
+							store.dispatch(stateActions.setConsumerPaused(consumer.id, 'remote'));
+						});
+
+						consumer.on('producerresume', () => {
+							logger.debug('Consumer "producerresume" event [consumerId:%s]', consumer.id);
+
+							store.dispatch(stateActions.setConsumerResumed(consumer.id, 'remote'));
+						});
+
+						consumer.on('score', (score) => {
+							logger.debug('Consumer "score" event [consumerId:%s, score:%o]', consumer.id, score);
+
+							store.dispatch(stateActions.setConsumerScore(consumer.id, score));
+						});
+
+						consumer.on('layerschange', (layers) => {
+							logger.debug(
+								'Consumer "layerschange" event [consumerId:%s, layers:%o]',
+								consumer.id,
+								layers
+							);
+
+							store.dispatch(stateActions.setConsumerLayers(consumer.id, layers));
+						});
+
 						const { spatialLayers, temporalLayers } =
 							mediasoupClient.parseScalabilityMode(
 								consumer.rtpParameters.encodings[0].scalabilityMode
@@ -440,9 +476,23 @@ export default class RoomClient {
 						// resume this Consumer (which was paused for now if video).
 						accept();
 
-						// If audio-only mode is enabled, pause it.
-						if (consumer.kind === 'video' && store.getState().me.audioOnly)
+						// FIXED: Only pause video consumers if explicitly in audio-only mode
+						// and not when using external video (pre-recorded video broadcasting)
+						if (consumer.kind === 'video' && 
+							store.getState().me.audioOnly && 
+							!this._externalVideo) {
 							this._pauseConsumer(consumer);
+						}
+						
+						// For external video broadcasting, ensure video consumers stay active
+						if (consumer.kind === 'video' && this._externalVideo) {
+							// Force resume the consumer to ensure it stays active
+							setTimeout(() => {
+								if (!consumer.closed && consumer.paused) {
+									this._resumeConsumer(consumer);
+								}
+							}, 100);
+						}
 					} catch (error) {
 						logger.error('"newConsumer" request failed:%o', error);
 
@@ -1537,6 +1587,12 @@ export default class RoomClient {
 	async enableAudioOnly() {
 		logger.debug('enableAudioOnly()');
 
+		// Prevent audio-only mode when using external video for broadcasting
+		if (this._externalVideo && this._produce) {
+			logger.warn('Audio-only mode disabled during external video broadcasting');
+			return;
+		}
+
 		store.dispatch(stateActions.setAudioOnlyInProgress(true));
 
 		this.disableWebcam();
@@ -2435,6 +2491,16 @@ export default class RoomClient {
 				logger.debug('Enabling QoE logging with %d ms interval', qoeInterval);
 				this._qoeManager.enable(qoeInterval);
 			}
+
+			// Prevent auto audio-only for external video broadcasting
+			if (this._externalVideo) {
+				this._preventAutoAudioOnly();
+				
+				// Set up periodic check to ensure video consumers stay active
+				setInterval(() => {
+					this._preventAutoAudioOnly();
+				}, 5000); // Check every 5 seconds
+			}
 		} catch (error) {
 			logger.error('_joinRoom() failed:%o', error);
 
@@ -2531,6 +2597,23 @@ export default class RoomClient {
 					text: `Error resuming Consumer: ${error}`,
 				})
 			);
+		}
+	}
+
+	/**
+	 * Prevent automatic audio-only mode for external video broadcasting
+	 */
+	_preventAutoAudioOnly() {
+		if (this._externalVideo) {
+			// Override the audio-only state to false for external video
+			store.dispatch(stateActions.setAudioOnlyState(false));
+			
+			// Ensure all video consumers are resumed
+			for (const consumer of this._consumers.values()) {
+				if (consumer.kind === 'video' && consumer.paused) {
+					this._resumeConsumer(consumer);
+				}
+			}
 		}
 	}
 
