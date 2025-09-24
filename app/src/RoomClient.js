@@ -74,6 +74,8 @@ export default class RoomClient {
 		e2eKey,
 		consumerReplicas,
 		stats,
+		qoe,
+		qoeInterval,
 	}) {
 		logger.debug(
 			'constructor() [roomId:"%s", peerId:"%s", displayName:"%s", device:%s]',
@@ -275,6 +277,15 @@ export default class RoomClient {
 
 		// QoE Manager for video quality logging
 		this._qoeManager = new QoEManager(this);
+
+		// Auto-enable QoE logging if requested via URL
+		if (qoe) {
+			// Enable QoE logging after a short delay to ensure room is joined
+			setTimeout(() => {
+				this.enableQoELogging(qoeInterval, qoeInterval * 10);
+				logger.debug('QoE logging auto-enabled via URL parameter (interval: %dms)', qoeInterval);
+			}, 2000);
+		}
 	}
 
 	close() {

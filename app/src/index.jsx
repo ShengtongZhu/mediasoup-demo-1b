@@ -94,7 +94,12 @@ async function run() {
 	const stats = urlParser.query.stats === 'true';
 	const faceDetection = urlParser.query.faceDetection === 'true';
 	const externalVideo = urlParser.query.externalVideo === 'true';
-	const videoSource = urlParser.query.videoSource; // New parameter
+	const videoSource = urlParser.query.videoSource;
+	
+	// Add QoE parameter parsing
+	const qoe = urlParser.query.qoe === 'true';
+	const qoeInterval = urlParser.query.qoeInterval ? 
+		Number(urlParser.query.qoeInterval) : 1000;
 	const throttleSecret = urlParser.query.throttleSecret;
 	const e2eKey = urlParser.query.e2eKey;
 	const consumerReplicas = urlParser.query.consumerReplicas;
@@ -216,6 +221,8 @@ async function run() {
 		e2eKey,
 		consumerReplicas,
 		stats,
+		qoe,        // Add this
+		qoeInterval // Add this
 	});
 
 	// NOTE: For debugging.
