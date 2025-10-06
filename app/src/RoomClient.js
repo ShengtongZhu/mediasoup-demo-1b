@@ -201,13 +201,30 @@ export default class RoomClient {
 			this._externalVideo.loop = true;
 			this._externalVideo.setAttribute('playsinline', '');
 			
+			// Add more event listeners
+			this._externalVideo.addEventListener('ended', () => {
+				logger.warn('External video ended - this may interrupt the stream');
+			});
+
+			this._externalVideo.addEventListener('pause', () => {
+				logger.warn('External video paused');
+			});
+
+			this._externalVideo.addEventListener('play', () => {
+				logger.debug('External video playing');
+			});
+
+			this._externalVideo.addEventListener('error', (event) => {
+				logger.error('External video error: %o', event);
+			});
+			
 			// Use dynamic video source instead of static EXTERNAL_VIDEO_SRC
 			this._currentVideoSrc = getExternalVideoSrc(videoSource);
 			this._externalVideo.src = this._currentVideoSrc;
 
 			this._externalVideo
 				.play()
-				.catch(error => logger.warn('externalVideo.play() failed:%o', error));
+				.catch(error => logger.error('externalVideo.play() failed:%o', error));
 		}
 
 		// Protoo URL.
@@ -1232,6 +1249,34 @@ export default class RoomClient {
 				codecOptions,
 				codec,
 			});
+
+			// Add producer monitoring
+			logger.debug('Producer created: %o', {
+				id: this._webcamProducer.id,
+				paused: this._webcamProducer.paused,
+				closed: this._webcamProducer.closed,
+				kind: this._webcamProducer.kind
+			});
+
+			// Monitor producer events
+			this._webcamProducer.on('pause', () => {
+				logger.warn('Producer paused - consumers will request key frames');
+			});
+
+			this._webcamProducer.on('resume', () => {
+				logger.debug('Producer resumed');
+			});
+
+			// Ensure producer is not paused
+			if (this._webcamProducer.paused) {
+				logger.warn('Producer is paused after creation, resuming...');
+				try {
+					await this._webcamProducer.resume();
+					logger.debug('Producer resumed successfully');
+				} catch (error) {
+					logger.error('Failed to resume producer: %o', error);
+				}
+			}
 
 			if (this._e2eKey && e2e.isSupported()) {
 				e2e.setupSenderTransform(this._webcamProducer.rtpSender);
@@ -2697,15 +2742,55 @@ export default class RoomClient {
 			try {
 				await this._externalVideo.play();
 			} catch (error) {
-				logger.warn('externalVideo.play() failed:%o', error);
+				logger.error('externalVideo.play() failed:%o', error);
+				throw error;
 			}
 		}
+
+		// Add detailed logging
+		logger.debug('Video element state before capture: %o', {
+			readyState: this._externalVideo.readyState,
+			paused: this._externalVideo.paused,
+			ended: this._externalVideo.ended,
+			videoWidth: this._externalVideo.videoWidth,
+			videoHeight: this._externalVideo.videoHeight,
+			currentTime: this._externalVideo.currentTime,
+			duration: this._externalVideo.duration
+		});
 
 		if (this._externalVideo.captureStream)
 			this._externalVideoStream = this._externalVideo.captureStream();
 		else if (this._externalVideo.mozCaptureStream)
 			this._externalVideoStream = this._externalVideo.mozCaptureStream();
 		else throw new Error('video.captureStream() not supported');
+
+		// Monitor stream and track state
+		const videoTracks = this._externalVideoStream.getVideoTracks();
+		logger.debug('Captured stream info: %o', {
+			streamId: this._externalVideoStream.id,
+			active: this._externalVideoStream.active,
+			videoTracksCount: videoTracks.length
+		});
+
+		if (videoTracks.length > 0) {
+			const track = videoTracks[0];
+			logger.debug('Video track info: %o', {
+				id: track.id,
+				kind: track.kind,
+				readyState: track.readyState,
+				enabled: track.enabled,
+				muted: track.muted
+			});
+
+			// Monitor track events
+			track.addEventListener('ended', () => {
+				logger.error('Video track ended - this will cause key frame requests');
+			});
+
+			track.addEventListener('mute', () => {
+				logger.warn('Video track muted - this may cause key frame requests');
+			});
+		}
 
 		return this._externalVideoStream;
 	}
