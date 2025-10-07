@@ -201,7 +201,40 @@ export default class RoomClient {
 			this._externalVideo.loop = true;
 			this._externalVideo.setAttribute('playsinline', '');
 			
-			// Add more event listeners
+			// Add comprehensive event listeners for debugging
+			this._externalVideo.addEventListener('loadstart', () => {
+				logger.debug('Video loadstart event');
+			});
+			
+			this._externalVideo.addEventListener('loadedmetadata', () => {
+				logger.debug('Video loadedmetadata event: %o', {
+					videoWidth: this._externalVideo.videoWidth,
+					videoHeight: this._externalVideo.videoHeight,
+					duration: this._externalVideo.duration
+				});
+			});
+			
+			this._externalVideo.addEventListener('loadeddata', () => {
+				logger.debug('Video loadeddata event');
+			});
+			
+			this._externalVideo.addEventListener('canplay', () => {
+				logger.debug('Video canplay event');
+			});
+			
+			this._externalVideo.addEventListener('canplaythrough', () => {
+				logger.debug('Video canplaythrough event');
+			});
+			
+			this._externalVideo.addEventListener('error', (event) => {
+				logger.error('Video error event: %o', {
+					error: event.target.error,
+					code: event.target.error?.code,
+					message: event.target.error?.message,
+					src: this._externalVideo.src
+				});
+			});
+			
 			this._externalVideo.addEventListener('ended', () => {
 				logger.warn('External video ended - this may interrupt the stream');
 			});
@@ -213,18 +246,15 @@ export default class RoomClient {
 			this._externalVideo.addEventListener('play', () => {
 				logger.debug('External video playing');
 			});
-
-			this._externalVideo.addEventListener('error', (event) => {
-				logger.error('External video error: %o', event);
-			});
 			
-			// Use dynamic video source instead of static EXTERNAL_VIDEO_SRC
+			// Use dynamic video source
 			this._currentVideoSrc = getExternalVideoSrc(videoSource);
 			this._externalVideo.src = this._currentVideoSrc;
+			
+			logger.debug('External video element created with src: %s', this._currentVideoSrc);
 
-			this._externalVideo
-				.play()
-				.catch(error => logger.error('externalVideo.play() failed:%o', error));
+			// Don't play immediately - let it load first
+			this._externalVideo.load();
 		}
 
 		// Protoo URL.
@@ -1250,13 +1280,34 @@ export default class RoomClient {
 				codec,
 			});
 
-			// Add producer monitoring
+			// Add comprehensive producer monitoring
 			logger.debug('Producer created: %o', {
 				id: this._webcamProducer.id,
 				paused: this._webcamProducer.paused,
 				closed: this._webcamProducer.closed,
-				kind: this._webcamProducer.kind
+				kind: this._webcamProducer.kind,
+				track: {
+					id: this._webcamProducer.track.id,
+					kind: this._webcamProducer.track.kind,
+					readyState: this._webcamProducer.track.readyState,
+					enabled: this._webcamProducer.track.enabled,
+					muted: this._webcamProducer.track.muted
+				}
 			});
+
+			// Monitor producer stats periodically
+			const statsInterval = setInterval(async () => {
+				if (this._webcamProducer && !this._webcamProducer.closed) {
+					try {
+						const stats = await this._webcamProducer.getStats();
+						logger.debug('Producer stats: %o', stats);
+					} catch (error) {
+						logger.error('Failed to get producer stats: %o', error);
+					}
+				} else {
+					clearInterval(statsInterval);
+				}
+			}, 5000)
 
 			// Monitor producer events
 			this._webcamProducer.on('pause', () => {
@@ -2731,15 +2782,32 @@ export default class RoomClient {
 	async _getExternalVideoStream() {
 		if (this._externalVideoStream) return this._externalVideoStream;
 
-		if (this._externalVideo.readyState < 3) {
-			await new Promise(resolve =>
-				this._externalVideo.addEventListener('canplay', resolve)
-			);
+		logger.debug('Getting external video stream...');
+		
+		// Wait for video to be ready
+		if (this._externalVideo.readyState < HTMLMediaElement.HAVE_ENOUGH_DATA) {
+			logger.debug('Waiting for video to be ready, current readyState: %d', this._externalVideo.readyState);
+			await new Promise((resolve, reject) => {
+				const timeout = setTimeout(() => {
+					reject(new Error('Video loading timeout'));
+				}, 10000); // 10 second timeout
+				
+				this._externalVideo.addEventListener('canplaythrough', () => {
+					clearTimeout(timeout);
+					resolve();
+				}, { once: true });
+				
+				this._externalVideo.addEventListener('error', (event) => {
+					clearTimeout(timeout);
+					reject(new Error(`Video loading error: ${event.target.error?.message}`));
+				}, { once: true });
+			});
 		}
 
 		// Ensure it is actually playing before capturing
 		if (this._externalVideo.paused) {
 			try {
+				logger.debug('Starting video playback...');
 				await this._externalVideo.play();
 			} catch (error) {
 				logger.error('externalVideo.play() failed:%o', error);
@@ -2747,7 +2815,7 @@ export default class RoomClient {
 			}
 		}
 
-		// Add detailed logging
+		// Add detailed logging before capture
 		logger.debug('Video element state before capture: %o', {
 			readyState: this._externalVideo.readyState,
 			paused: this._externalVideo.paused,
@@ -2755,14 +2823,29 @@ export default class RoomClient {
 			videoWidth: this._externalVideo.videoWidth,
 			videoHeight: this._externalVideo.videoHeight,
 			currentTime: this._externalVideo.currentTime,
-			duration: this._externalVideo.duration
+			duration: this._externalVideo.duration,
+			src: this._externalVideo.src,
+			networkState: this._externalVideo.networkState
 		});
 
-		if (this._externalVideo.captureStream)
-			this._externalVideoStream = this._externalVideo.captureStream();
-		else if (this._externalVideo.mozCaptureStream)
-			this._externalVideoStream = this._externalVideo.mozCaptureStream();
-		else throw new Error('video.captureStream() not supported');
+		// Validate video dimensions
+		if (this._externalVideo.videoWidth === 0 || this._externalVideo.videoHeight === 0) {
+			throw new Error('Video has no dimensions - video may not be loaded properly');
+		}
+
+		// Capture stream
+		try {
+			if (this._externalVideo.captureStream) {
+				this._externalVideoStream = this._externalVideo.captureStream();
+			} else if (this._externalVideo.mozCaptureStream) {
+				this._externalVideoStream = this._externalVideo.mozCaptureStream();
+			} else {
+				throw new Error('video.captureStream() not supported');
+			}
+		} catch (error) {
+			logger.error('Failed to capture stream: %o', error);
+			throw error;
+		}
 
 		// Monitor stream and track state
 		const videoTracks = this._externalVideoStream.getVideoTracks();
@@ -2772,25 +2855,45 @@ export default class RoomClient {
 			videoTracksCount: videoTracks.length
 		});
 
-		if (videoTracks.length > 0) {
-			const track = videoTracks[0];
-			logger.debug('Video track info: %o', {
-				id: track.id,
-				kind: track.kind,
-				readyState: track.readyState,
-				enabled: track.enabled,
-				muted: track.muted
-			});
-
-			// Monitor track events
-			track.addEventListener('ended', () => {
-				logger.error('Video track ended - this will cause key frame requests');
-			});
-
-			track.addEventListener('mute', () => {
-				logger.warn('Video track muted - this may cause key frame requests');
-			});
+		if (videoTracks.length === 0) {
+			throw new Error('No video tracks in captured stream');
 		}
+
+		const track = videoTracks[0];
+		logger.debug('Video track info: %o', {
+			id: track.id,
+			kind: track.kind,
+			readyState: track.readyState,
+			enabled: track.enabled,
+			muted: track.muted,
+			label: track.label
+		});
+
+		// Validate track state
+		if (track.readyState !== 'live') {
+			logger.error('Video track is not live: %s', track.readyState);
+		}
+		
+		if (track.muted) {
+			logger.warn('Video track is muted');
+		}
+		
+		if (!track.enabled) {
+			logger.warn('Video track is disabled');
+		}
+
+		// Monitor track events
+		track.addEventListener('ended', () => {
+			logger.error('Video track ended - this will cause key frame requests');
+		});
+
+		track.addEventListener('mute', () => {
+			logger.warn('Video track muted - this may cause key frame requests');
+		});
+
+		track.addEventListener('unmute', () => {
+			logger.debug('Video track unmuted');
+		});
 
 		return this._externalVideoStream;
 	}
